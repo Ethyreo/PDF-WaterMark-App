@@ -40,7 +40,7 @@ class _SplashScreenState extends State<SplashScreen> {
               ),
             ),
             Text(
-              "PDF Watermark Super App",
+              "Banga Chunga PDF",
               textAlign: TextAlign.center,
               style: GoogleFonts.pressStart2p(
                 fontSize: 12,

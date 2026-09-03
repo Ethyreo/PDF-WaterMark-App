@@ -1,16 +1,37 @@
-import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:pdf_watermarker/screens/options_screen.dart';
-import 'package:pdf_watermarker/theme/retro_theme.dart';
-import 'package:pdf_watermarker/services/watermark_service.dart';
-import 'package:pdf_watermarker/services/google_drive_service.dart';
-import 'package:pdf_watermarker/utils/sticky_audio_player.dart';
-import 'package:pdf_watermarker/theme/retro_theme.dart';
-import 'package:pdf_watermarker/services/watermark_service.dart';
-import 'package:pdf_watermarker/theme/retro_theme.dart';
+import 'dart:io';
 
-class HomeScreen extends StatelessWidget {
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:pdf_watermarker/screens/image_to_pdf_screen.dart';
+import 'package:pdf_watermarker/screens/options_screen.dart';
+import 'package:pdf_watermarker/services/google_drive_service.dart';
+import 'package:pdf_watermarker/services/preferences_service.dart';
+import 'package:pdf_watermarker/services/watermark_service.dart';
+import 'package:pdf_watermarker/theme/retro_theme.dart';
+import 'package:pdf_watermarker/utils/sticky_audio_player.dart';
+
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _requestPermissions();
+  }
+
+  Future<void> _requestPermissions() async {
+    // Request standard storage and Android 11+ manage external storage permissions
+    await [
+      Permission.storage,
+      Permission.manageExternalStorage,
+    ].request();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,15 +61,18 @@ class HomeScreen extends StatelessWidget {
               const SizedBox(height: 48),
               ElevatedButton.icon(
                 icon: const Icon(Icons.folder_open),
-                label: const Text('LOCAL UPLOAD'),
+                label: const Text('LOCAL PDFs'),
                 onPressed: () => _handleLocalUpload(context),
               ),
               const SizedBox(height: 24),
-              const Center(
-                child: Text(
-                  'VS',
-                  style: TextStyle(color: RetroTheme.secondary, fontSize: 16),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.photo_library),
+                label: const Text('IMAGES TO PDF'),
+                style: ElevatedButton.styleFrom(
+                  side: const BorderSide(color: RetroTheme.accent, width: 4),
+                  foregroundColor: RetroTheme.accent,
                 ),
+                onPressed: () => _handleImageSelection(context),
               ),
               const SizedBox(height: 24),
               ElevatedButton.icon(
@@ -90,9 +114,68 @@ class HomeScreen extends StatelessWidget {
     );
 
     if (result != null) {
-      List<File> files = result.paths.map((path) => File(path!)).toList();
+      // Filter out null paths (which happen with cloud files on Android)
+      List<String> validPaths = result.paths
+          .where((path) => path != null)
+          .cast<String>()
+          .toList();
+
+      if (validPaths.isEmpty) {
+        // Show an error if no valid local paths were selected
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Error: Selected files are not local or inaccessible.',
+              style: TextStyle(color: RetroTheme.accent),
+            ),
+          ),
+        );
+        return;
+      }
+
+      List<File> files = validPaths.map((path) => File(path)).toList();
       _showProcessingDialog(context, files);
     }
+  }
+
+  Future<void> _handleImageSelection(BuildContext context) async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.custom,
+      allowedExtensions: ['png', 'jpg', 'jpeg'],
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    final List<File> files = result.paths
+        .whereType<String>()
+        .map(File.new)
+        .toList();
+
+    if (files.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Error: Selected image files are not local or inaccessible.',
+            style: TextStyle(color: RetroTheme.accent),
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (!context.mounted) {
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (BuildContext context) => ImageToPdfScreen(initialImages: files),
+      ),
+    );
   }
 
   void _showProcessingDialog(BuildContext context, List<File> files) {
@@ -106,21 +189,34 @@ class HomeScreen extends StatelessWidget {
             
             // Start processing asynchronously
             Future.delayed(const Duration(milliseconds: 500), () async {
-              final result = await WatermarkService.processFiles(
-                sourceFiles: files,
-                onProgress: (current, total) {
-                  // This callback might fire too fast to rebuild UI cleanly every millisecond,
-                  // but we can try to update occasionally if needed.
-                },
-              );
-              Navigator.pop(context); // Close dialog
-              _showResultDialog(context, result);
+              try {
+                final result = await WatermarkService.processFiles(
+                  sourceFiles: files,
+                  onProgress: (current, total) {
+                    setState(() {
+                      statusText = 'PROCESSING $current / $total...';
+                    });
+                  },
+                );
+                if (Navigator.canPop(context)) {
+                  Navigator.pop(context);
+                }
+                _showResultDialog(context, result);
+              } catch (e) {
+                if (Navigator.canPop(context)) {
+                  Navigator.pop(context);
+                }
+                _showResultDialog(
+                  context,
+                  WatermarkResult(0, files.length, ['System Error: $e']),
+                );
+              }
             });
 
             return AlertDialog(
               backgroundColor: RetroTheme.background,
-              shape: RoundedRectangleBorder(
-                side: const BorderSide(color: RetroTheme.primary, width: 4),
+              shape: const RoundedRectangleBorder(
+                side: BorderSide(color: RetroTheme.primary, width: 4),
               ),
               title: const Text('PROCESSING', style: TextStyle(color: RetroTheme.primary)),
               content: Column(
@@ -144,11 +240,17 @@ class HomeScreen extends StatelessWidget {
       builder: (context) => AlertDialog(
         backgroundColor: RetroTheme.background,
         shape: RoundedRectangleBorder(
-          side: BorderSide(color: result.failCount == 0 ? RetroTheme.primary : RetroTheme.accent, width: 4),
+          side: BorderSide(
+            color: result.failCount == 0
+                ? RetroTheme.primary
+                : RetroTheme.accent,
+            width: 4,
+          ),
         ),
         title: const Text('MISSION COMPLETE'),
         content: Text(
           'SUCCESS: ${result.successCount}\nFAILED: ${result.failCount}\n\n'
+          '${result.successCount > 0 ? "Saved to: ${PreferencesService.outputFolderPath}\n\n" : ""}'
           '${result.errors.isNotEmpty ? result.errors.take(3).join('\n') : "All files processed clean."}',
           style: const TextStyle(fontSize: 10),
         ),
@@ -172,7 +274,10 @@ class HomeScreen extends StatelessWidget {
         shape: const RoundedRectangleBorder(
           side: BorderSide(color: RetroTheme.primary, width: 4),
         ),
-        title: const Text('ENTER G-DRIVE FOLDER LINK', style: TextStyle(color: RetroTheme.primary, fontSize: 12)),
+        title: const Text(
+          'ENTER G-DRIVE FOLDER LINK',
+          style: TextStyle(color: RetroTheme.primary, fontSize: 12),
+        ),
         content: TextField(
           controller: linkController,
           style: const TextStyle(fontSize: 10),
@@ -207,34 +312,34 @@ class HomeScreen extends StatelessWidget {
         return StatefulBuilder(
           builder: (context, setState) {
             String statusText = 'AUTHENTICATING G-DRIVE...';
-            
+
             Future.delayed(const Duration(milliseconds: 500), () async {
               try {
-                // Get exactly where they want to save it so we can download straight to there and process in place, 
+                // Get exactly where they want to save it so we can download straight to there and process in place,
                 // or just to a temp dir and the processFiles will save the final back to the output dir.
                 // Let's use a temporary directory for the downloaded raw files.
                 final tempDir = Directory.systemTemp.createTempSync('gdrive_raw_');
-                
+
                 final GoogleDriveService driveService = GoogleDriveService();
                 await driveService.signIn();
-                
+
                 setState(() => statusText = 'DOWNLOADING FILES... (This may take a while)');
-                
+
                 List<File> rawFiles = await driveService.downloadFolderFiles(
-                  folderUrl, 
-                  tempDir.path, 
+                  folderUrl,
+                  tempDir.path,
                   (current, total) {
                     // Update progress if needed
-                  }
+                  },
                 );
-                
+
                 setState(() => statusText = 'WATERMARKING ${rawFiles.length} FILES...');
 
                 final watermarkResult = await WatermarkService.processFiles(
                   sourceFiles: rawFiles,
                   onProgress: (c, t) {},
                 );
-                
+
                 // Cleanup temp dir
                 try {
                   tempDir.deleteSync(recursive: true);
@@ -244,7 +349,6 @@ class HomeScreen extends StatelessWidget {
 
                 Navigator.pop(context);
                 _showResultDialog(context, watermarkResult);
-
               } catch (e) {
                 Navigator.pop(context);
                 _showResultDialog(context, WatermarkResult(0, 0, ['GDrive Error: $e']));
@@ -262,7 +366,11 @@ class HomeScreen extends StatelessWidget {
                 children: [
                   const CircularProgressIndicator(color: RetroTheme.secondary),
                   const SizedBox(height: 20),
-                  Text(statusText, style: const TextStyle(fontSize: 10), textAlign: TextAlign.center),
+                  Text(
+                    statusText,
+                    style: const TextStyle(fontSize: 10),
+                    textAlign: TextAlign.center,
+                  ),
                 ],
               ),
             );

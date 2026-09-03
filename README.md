@@ -37,6 +37,7 @@ python_watermark_logic/                # Original Python watermarking scripts (r
 ## Features
 
 - **Local PDF Upload:** Pick one or multiple PDFs from the device and batch watermark them.
+- **Images to PDF:** Pick multiple images, rearrange their order, and export them as one PDF.
 - **Google Drive Integration:** Paste a Google Drive folder link, authenticate via Google Sign-In, and download + watermark all PDFs in the folder.
 - **Custom Watermark:** Upload a watermark as either a PDF or an Image (PNG/JPG). Images are auto-scaled to 80% of page size and set to 25% opacity.
 - **Output Folder Selection:** Choose where watermarked files are saved.

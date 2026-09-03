@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'package:pdf_watermarker/services/preferences_service.dart';
@@ -38,15 +39,24 @@ class WatermarkService {
     try {
       // Pre-load watermark
       final File wmFile = File(watermarkPath);
-      final Uint8List wmBytes = await wmFile.readAsBytes();
+      late final Uint8List wmBytes;
+      try {
+        wmBytes = await wmFile.readAsBytes();
+      } catch (e) {
+        return WatermarkResult(0, sourceFiles.length, ['Failed to read watermark file. It may be a cloud file or lack permissions: $e']);
+      }
       
       PdfDocument? wmPdfDoc;
       PdfBitmap? wmBitmap;
 
-      if (isPdfWatermark) {
-        wmPdfDoc = PdfDocument(inputBytes: wmBytes);
-      } else {
-        wmBitmap = PdfBitmap(wmBytes);
+      try {
+        if (isPdfWatermark) {
+          wmPdfDoc = PdfDocument(inputBytes: wmBytes);
+        } else {
+          wmBitmap = PdfBitmap(wmBytes);
+        }
+      } catch(e) {
+         return WatermarkResult(0, sourceFiles.length, ['Failed to parse watermark file: $e']);
       }
 
       for (int i = 0; i < sourceFiles.length; i++) {
