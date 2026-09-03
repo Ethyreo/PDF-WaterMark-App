@@ -1,6 +1,6 @@
-# Ken's Banga Changa PDF Watermark Super App
+# PDF Watermark and Document Conversion App
 
-A Flutter-based Android app with a retro 8-bit theme for batch watermarking PDFs. Built by Ken for Lovish.
+A Flutter-based Android application with a retro theme for batch watermarking PDFs and converting image sets to PDF documents.
 
 ## Project Structure
 
